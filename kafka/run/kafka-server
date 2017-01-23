@@ -1,0 +1,112 @@
+#!/bin/bash
+# Start Kafka
+
+# configure
+if [[ -z "$KAFKA_PORT" ]]; then
+    export KAFKA_PORT=9092
+fi
+
+if [[ -z "$KAFKA_BROKER_ID" ]]; then
+    # By default auto allocate broker ID
+    export KAFKA_BROKER_ID=-1
+fi
+
+if [[ -z "$KAFKA_LOG_DIRS" ]]; then
+    export KAFKA_LOG_DIRS="/data/kafka-logs-$HOSTNAME"
+fi
+
+for VAR in `env`
+do
+  if [[ $VAR =~ ^KAFKA_ && ! $VAR =~ ^KAFKA_HOME ]]; then
+    kafka_name=`echo "$VAR" | sed -r "s/KAFKA_(.*)=.*/\1/g" | tr '[:upper:]' '[:lower:]' | tr _ .`
+    env_var=`echo "$VAR" | sed -r "s/(.*)=.*/\1/g"`
+    if egrep -q "(^|^#)$kafka_name=" $KAFKA_HOME/config/server.properties; then
+        sed -r -i "s@(^|^#)($kafka_name)=(.*)@\2=${!env_var}@g" $KAFKA_HOME/config/server.properties #note that no config values may contain an '@' char
+    else
+        echo "$kafka_name=${!env_var}" >> $KAFKA_HOME/config/server.properties
+    fi
+  fi
+done
+
+if [[ -z "$ZOOKEEPER_PORT" ]]; then
+    export ZOOKEEPER_PORT=2181
+fi
+
+if [[ -z "$KAFKA_ZOOKEEPER_CONNECT" ]]; then
+    export KAFKA_ZOOKEEPER_CONNECT="localhost:$ZOOKEEPER_PORT"
+fi
+
+if [[ -z "$START_TIMEOUT" ]]; then
+    export START_TIMEOUT=600
+fi
+
+wait_until_port_opens() {
+
+    port=$1
+    start_timeout=${2:-600}
+    start_timeout_exceeded=false
+    count=0
+    step=2
+    while netstat -lnt | awk '$4 ~ /:'$port'$/ {exit 1}'; do
+        sleep $step;
+        count=$(expr $count + $step)
+        if [ $count -gt $start_timeout ]; then
+            start_timeout_exceeded=true
+            return 0
+        fi
+    done
+    return 1
+}
+
+mkdir -p $KAFKA_LOG_DIRS
+
+# Start zookeeper
+$KAFKA_HOME/bin/zookeeper-server-start.sh $KAFKA_HOME/config/zookeeper.properties > $KAFKA_LOG_DIRS/zookeeper-server.log 2>&1 &
+    ZOOKEEPER_PID=$!
+
+echo "waiting for zookeeper to be ready"
+if wait_until_port_opens $ZOOKEEPER_PORT $START_TIMEOUT; then
+    echo "Not able to start zookeeper (waited for $START_TIMEOUT sec)"
+    exit 1
+fi
+
+# Start kafka
+$KAFKA_HOME/bin/kafka-server-start.sh $KAFKA_HOME/config/server.properties > $KAFKA_LOG_DIRS/kafka-server.log 2>&1 &
+    KAFKA_PID=$!
+
+chmod a+rw $KAFKA_LOG_DIRS -R
+
+echo "waiting for kafka to be ready"
+if wait_until_port_opens $KAFKA_PORT $START_TIMEOUT; then
+    echo "Not able to start kafka (waited for $START_TIMEOUT sec)"
+    exit 1
+fi
+
+# Term handler
+term_handler() {
+  echo 'Stopping Kafka....'
+  if [ $KAFKA_PID -ne 0 ]; then
+    kill -s TERM "$KAFKA_PID"
+    wait "$KAFKA_PID"
+  fi
+  echo 'Kafka stopped.'
+  exit
+}
+# Capture kill requests to stop properly
+trap "term_handler" SIGHUP SIGINT SIGTERM
+
+# create topics
+if [[ -n $KAFKA_CREATE_TOPICS ]]; then
+    IFS=','; for topicToCreate in $KAFKA_CREATE_TOPICS; do
+        echo "creating topics: $topicToCreate"
+        IFS=':' read -a topicConfig <<< "$topicToCreate"
+        if [ ${topicConfig[3]} ]; then
+          JMX_PORT='' $KAFKA_HOME/bin/kafka-topics.sh --create --zookeeper $KAFKA_ZOOKEEPER_CONNECT --replication-factor ${topicConfig[2]} --partition ${topicConfig[1]} --topic "${topicConfig[0]}" --config cleanup.policy="${topicConfig[3]}"
+        else
+          JMX_PORT='' $KAFKA_HOME/bin/kafka-topics.sh --create --zookeeper $KAFKA_ZOOKEEPER_CONNECT --replication-factor ${topicConfig[2]} --partition ${topicConfig[1]} --topic "${topicConfig[0]}"
+        fi
+    done
+fi
+
+wait $KAFKA_PID
+wait $ZOOKEEPER_PID
