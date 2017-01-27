@@ -5,16 +5,21 @@
 # group so it can be deleted from host side
 TARGET_GID=$(stat -c "%g" /data)
 TARGET_UID=$(stat -c "%u" /data)
-EXISTS=$(cat /etc/group | grep $TARGET_GID | wc -l)
-# Create new group using target GID and add nobody user
-if [ $EXISTS == "0" ]; then
-    addgroup -g $TARGET_GID tempgroup
-    adduser -G tempgroup -u $TARGET_UID -D -H -s /bin/ash tmpusr
-else
-    # GID exists, find group name and add
-    GROUP=$(getent group $TARGET_GID | cut -d: -f1)
-    adduser -G $GROUP -u $TARGET_UID -D -H -s /bin/ash tmpusr
-fi
+GRP_EXISTS=$(cat /etc/group | grep $TARGET_GID | wc -l)
 
-su -c "/opt/hbase-server" -s /bin/bash tmpusr
-# su -c "/bin/bash" -s /bin/bash tmpusr
+if [ "$TARGET_GID" == "0" ] && [ "$TARGET_UID" == "0" ]; then
+
+    /opt/hbase-server
+
+else
+    # Create new group using target GID and add nobody user
+    if [ $GRP_EXISTS == "0" ]; then
+        addgroup -g $TARGET_GID tempgroup
+        adduser -G tempgroup -u $TARGET_UID -D -H -s /bin/ash tmpusr
+    else
+        # GID exists, find group name and add
+        GROUP=$(getent group $TARGET_GID | cut -d: -f1)
+        adduser -G $GROUP -u $TARGET_UID -D -H -s /bin/ash tmpusr
+    fi
+    su -c "/opt/hbase-server" -s /bin/bash tmpusr
+fi

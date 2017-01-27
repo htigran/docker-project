@@ -12,14 +12,46 @@ mkdir -p $logs_dir /data/hbase /data/run
 # Thrift server (background)
 # Ports: 9090 API and 9095 UI
 echo "hbase thrift start logging to $logs_dir/hbase-thrift.log"
-hbase thrift start > $logs_dir/hbase-thrift.log 2>&1 &
+hbase thrift start > $logs_dir/hbase-thrift.log 2>&1 & thrift_pid=$!
 
 # REST server (background)
 # Ports: 8080 API
 echo "hbase rest start logging to $logs_dir/hbase-rest.log"
-hbase rest start > $logs_dir/hbase-rest.log 2>&1 &
+hbase rest start > $logs_dir/hbase-rest.log 2>&1 & rest_pid=$!
 
 # Master server (Foreground) that also starts the region server
 # Ports: Master: 16000 API, 16010 UI; 2181 ZK;  Region: 16020 API, 16030 UI
 echo "hbase master start logging to $logs_dir/hbase-master.log"
-exec hbase master start 2>&1 | tee $logs_dir/hbase-master.log
+hbase master start > $logs_dir/hbase-master.log 2>&1 & master_pid=$! | tee $logs_dir/hbase-master.log
+
+wait_until_port_opens() {
+
+    port=$1
+    start_timeout=${2:-600}
+    start_timeout_exceeded=false
+    count=0
+    step=2
+    while netstat -lnt | awk '$4 ~ /:'$port'$/ {exit 1}'; do
+        sleep $step;
+        count=$(expr $count + $step)
+        if [ $count -gt $start_timeout ]; then
+            start_timeout_exceeded=true
+            return 0
+        fi
+    done
+    return 1
+}
+
+start_timeout=600
+
+echo "waiting for hbase master to be ready"
+if wait_until_port_opens 9090 $start_timeout; then
+    echo "Not able to start hbase-master (waited for $start_timeout sec)"
+    exit 1
+fi
+
+touch "$logs_dir/done"
+
+wait $master_pid
+wait $thrift_pid
+wait $rest_pid

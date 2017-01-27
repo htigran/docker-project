@@ -3,7 +3,7 @@
 import happybase
 
 def main():
-    HOST='klocalhost'
+    HOST='localhost'
     PORT=9090
     # Will create and then delete this table
     TABLE_NAME='table-name'

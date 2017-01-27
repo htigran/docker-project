@@ -2,12 +2,18 @@
 #
 # Script to stop docker
 
-echo "Stopping hbase-docker container"
-# docker stop hbase-docker
-docker kill hbase-docker
+source config.sh
 
-echo "Removing data folder"
-rm -fr data/hbase
+echo "Stopping $hbase_docker_container container"
 
-echo "Removing hbase-docker container"
-docker rm hbase-docker
+running=$(docker ps | grep " $hbase_docker_container ")
+if [ ! -z "$running" ]; then
+    # docker stop hbase-docker
+    docker kill $hbase_docker_container
+
+    echo "Removing data folder"
+    rm -fr data/hbase
+
+    echo "Removing hbase-docker container"
+    docker rm $hbase_docker_container
+fi

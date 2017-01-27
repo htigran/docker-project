@@ -12,7 +12,7 @@ if [[ -z "$KAFKA_BROKER_ID" ]]; then
 fi
 
 if [[ -z "$KAFKA_LOG_DIRS" ]]; then
-    export KAFKA_LOG_DIRS="/data/kafka-logs-$HOSTNAME"
+    export KAFKA_LOG_DIRS="/data/"
 fi
 
 for VAR in `env`
@@ -107,6 +107,8 @@ if [[ -n $KAFKA_CREATE_TOPICS ]]; then
         fi
     done
 fi
+
+touch "$KAFKA_LOG_DIRS/done"
 
 wait $KAFKA_PID
 wait $ZOOKEEPER_PID
